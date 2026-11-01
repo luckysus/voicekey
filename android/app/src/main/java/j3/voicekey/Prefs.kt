@@ -68,14 +68,15 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putBoolean("bubbleAlways", v).apply()
 
     var bubbleX: Int
-        get() = sp.getInt("bubbleX", -1)
+        get() = sp.getInt("bubbleX", UNSET)
         set(v) = sp.edit().putInt("bubbleX", v).apply()
 
     var bubbleY: Int
-        get() = sp.getInt("bubbleY", -1)
+        get() = sp.getInt("bubbleY", UNSET)
         set(v) = sp.edit().putInt("bubbleY", v).apply()
 
-    private companion object {
-        const val ALL = "all"
+    companion object {
+        const val UNSET = Int.MIN_VALUE
+        private const val ALL = "all"
     }
 }
