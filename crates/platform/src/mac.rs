@@ -203,8 +203,13 @@ pub(crate) fn type_text(text: &str) {
 /// Windows 用于重放被吞掉的修饰键；macOS 不吞修饰键，无需重放
 pub fn inject_key(_code: u32, _down: bool) {}
 
-/// 借剪贴板 + ⌘V 上屏，随后恢复原剪贴板（保留所有类型）
+/// 借剪贴板 + ⌘V 上屏，随后恢复原剪贴板（保留所有类型）。
+/// 调用方多在 tokio 常驻线程上，没有 autorelease pool 兜底，需自行包裹，否则备份的剪贴板数据永不释放。
 pub fn paste(text: &str) {
+    objc2::rc::autoreleasepool(|_| paste_inner(text));
+}
+
+fn paste_inner(text: &str) {
     use objc2::runtime::ProtocolObject;
     use objc2_app_kit::{NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting};
     use objc2_foundation::{NSArray, NSString};
@@ -240,13 +245,15 @@ pub fn paste(text: &str) {
         std::thread::spawn(move || {
             let restore = restore;
             std::thread::sleep(Duration::from_millis(500));
-            let arr: objc2::rc::Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
-                objc2::rc::Retained::from_raw(restore.0 as *mut _).unwrap();
-            let pb = NSPasteboard::generalPasteboard();
-            if pb.changeCount() == change {
-                pb.clearContents();
-                pb.writeObjects(&arr);
-            }
+            objc2::rc::autoreleasepool(|_| {
+                let arr: objc2::rc::Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+                    objc2::rc::Retained::from_raw(restore.0 as *mut _).unwrap();
+                let pb = NSPasteboard::generalPasteboard();
+                if pb.changeCount() == change {
+                    pb.clearContents();
+                    pb.writeObjects(&arr);
+                }
+            });
         });
     }
 }
@@ -354,16 +361,20 @@ pub fn secure_input() -> bool {
 
 pub fn front_app() -> Option<FrontApp> {
     use objc2_app_kit::NSWorkspace;
-    let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-    Some(FrontApp(app.processIdentifier()))
+    objc2::rc::autoreleasepool(|_| {
+        let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        Some(FrontApp(app.processIdentifier()))
+    })
 }
 
 impl FrontApp {
     pub fn activate(&self) {
         use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
-        if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(self.0) {
-            app.activateWithOptions(NSApplicationActivationOptions::empty());
-        }
+        objc2::rc::autoreleasepool(|_| {
+            if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(self.0) {
+                app.activateWithOptions(NSApplicationActivationOptions::empty());
+            }
+        });
     }
 }
 
