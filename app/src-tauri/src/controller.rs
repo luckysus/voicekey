@@ -1,6 +1,7 @@
 //! 会话编排：快捷键 → 录音 → 识别 → 上屏；「全部」模式流式候选面板；设置页渠道对比
 use crate::hotkey::{HotEvent, Shared};
 use crate::settings::{Channel, Settings};
+use crate::sound::SoundEvent;
 use crate::{offline, ui, wtoffline, AppState};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -163,6 +164,14 @@ pub struct Ctl {
     front: Option<pf::FrontApp>,
     last_emit: Instant,
     flush_pending: bool,
+    /// 本次录音结束时刻：「处理」提示音须在音量还原完成后播放，以此估算剩余还原窗口
+    stopped_at: Option<Instant>,
+    /// 本次会话是否确实压低过系统音量：「处理/失败」提示音只在压过音量时等待恢复窗口；
+    /// ducking 关闭（默认）或未生效时识别结束后立即播放，不固定晚约 450ms
+    ducked: bool,
+    /// 提示音会话代数：每次开始录音递增；延迟提示音到期时代数已变则丢弃，
+    /// 避免快速连续开始/停止时新旧提示音错拍重叠（发出奇怪声音）
+    chime_gen: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// 按下到判定长按之间已经打开的麦克风，确认开始后把这段音频交出去
     primed: Option<Primed>,
 }
@@ -227,6 +236,9 @@ pub fn spawn(app: AppHandle, qwen: Arc<QwenEngine>, rx: UnboundedReceiver<Msg>) 
         front: None,
         last_emit: Instant::now(),
         flush_pending: false,
+        stopped_at: None,
+        ducked: false,
+        chime_gen: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         primed: None,
     };
     tauri::async_runtime::spawn(ctl.run(rx));
@@ -294,6 +306,12 @@ impl Ctl {
             Msg::RefreshMeter => self.refresh_meter(),
             Msg::VolumeDucking { enabled, reduction_percent } => {
                 // 设置/UI 统一使用“降低比例”；worker 只接收最终保留比例，因此只在这里做一次补数换算。
+                // ducked 记录本次会话是否真的压低过音量：生效置位，显式关闭即视为已发起恢复。
+                if enabled && self.recording {
+                    self.ducked = true;
+                } else if !enabled {
+                    self.ducked = false;
+                }
                 self.volume_ducking.configure(enabled && self.recording, 1.0 - reduction_percent as f32 / 100.0)
             }
             Msg::MicrophonesChanged(mics) => {
@@ -404,6 +422,7 @@ impl Ctl {
                 Ok(v) => v,
                 Err(e) => {
                     ui::hud_error(&self.app, &format!("{e:#}"));
+                    crate::sound::play(&self.app, SoundEvent::Error);
                     return None;
                 }
             };
@@ -415,10 +434,31 @@ impl Ctl {
             audio
         };
 
+        // 成功开麦（含预开麦转正）发开始音。开始音必须在压低音量之前发
+        // （cometix-dictation 同序：开麦 → 播开始音 → 压音量），否则音没播完就被压掉。
+        // 新会话开始：递增提示音代数，上一会话尚在排队/等待的延迟提示音全部作废；
+        // ducked 按本会话重新累计，上一会话压没压过音量与本会话无关
+        self.chime_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.ducked = false;
+        crate::sound::play(&self.app, SoundEvent::Start);
         // Press 时的 arm() 只是预开麦，误触/短按取消都不应碰系统音量；只有确认真正进入聆听后才开始 duck。
+        // 压低延迟到开始提示音播完（按 play_duration）；handler 以 enabled && self.recording 把关，
+        // 提示音播放期间会话被取消时不会压低音量。
         let settings = self.settings();
-        self.volume_ducking
-            .configure(settings.lower_system_volume, settings.retained_system_volume_fraction());
+        let delay = crate::sound::play_duration(&self.app, SoundEvent::Start, &self.settings());
+        let (enabled, reduction_percent) = (settings.lower_system_volume, settings.lower_system_volume_percent);
+        let tx = self.tx.clone();
+        let chime_gen = self.chime_gen.clone();
+        let my_gen = chime_gen.load(std::sync::atomic::Ordering::Relaxed);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(delay).await;
+            // 延迟压音量与延迟提示音共用会话代数门闩：等待期间取消或又开了新会话
+            // （代数已变）则丢弃本条，避免上一次的延迟消息压到新一次的开始音（review #6）
+            if chime_gen.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                return;
+            }
+            let _ = tx.send(Msg::VolumeDucking { enabled, reduction_percent });
+        });
         Some(audio)
     }
 
@@ -499,10 +539,37 @@ impl Ctl {
         self.auto_stop = false;
         // 先发恢复意图；若此时还在淡入/淡出，worker 会从当前实际音量平滑反向，而不是排队跑完整段动画。
         self.volume_ducking.set_active(false);
+        self.stopped_at = Some(Instant::now());
         if let Some(mut r) = self.recorder.take() {
             r.stop();
         }
         ui::set_tray_active(&self.app, false);
+    }
+
+    /// 录音结束后的单音提示（处理音/失败音）：等系统输出音量恢复后再播，避免卡在还原淡入的前半段听不清。
+    /// 带会话代数门闩：等待期间用户再次开始录音（代数递增）则丢弃本条，避免新旧提示音错拍重叠。
+    /// 恢复窗口只对本次会话确实压低过音量的情况有意义；ducking 关闭/未生效时立即播放。
+    fn play_after_restore(&self, event: SoundEvent) {
+        let app = self.app.clone();
+        let restore_wait = if self.ducked { self.restore_wait() } else { Duration::ZERO };
+        let gen = self.chime_gen.clone();
+        let my_gen = gen.load(std::sync::atomic::Ordering::Relaxed);
+        tauri::async_runtime::spawn(async move {
+            if !restore_wait.is_zero() {
+                tokio::time::sleep(restore_wait).await;
+            }
+            if gen.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                return;
+            }
+            crate::sound::play(&app, event);
+        });
+    }
+
+    /// 距本次录音结束的剩余还原等待：stop 后不足恢复窗口（450ms，音量 worker 淡入上界）的部分。
+    fn restore_wait(&self) -> Duration {
+        const RESTORE_WINDOW: Duration = Duration::from_millis(450);
+        let since_stop = self.stopped_at.map_or(RESTORE_WINDOW, |t| t.elapsed());
+        RESTORE_WINDOW.saturating_sub(since_stop)
     }
 
     fn spawn_engine(&mut self, ch: Channel, seg: usize, audio: voicekey_core::Audio) {
@@ -702,11 +769,17 @@ impl Ctl {
                         format!("识别失败：{e}，已保留已识别的文字")
                     };
                     ui::hud_error(&self.app, &msg);
+                    self.play_after_restore(SoundEvent::Error);
                 } else if streamed {
                     ui::hud_hide(&self.app, 0);
+                    // 流式定稿：有文字即完成；什么都没识别到按失败提示
+                    if text.is_empty() {
+                        self.play_after_restore(SoundEvent::Error);
+                    }
                 } else if text.is_empty() {
                     ui::hud(&self.app, "info", "没有识别到内容", ch);
                     ui::hud_hide(&self.app, 1000);
+                    self.play_after_restore(SoundEvent::Error);
                 } else {
                     ui::hud_hide(&self.app, 0);
                     pf::paste(&text);
@@ -756,6 +829,11 @@ impl Ctl {
                         self.mode = Mode::Idle;
                         self.tasks.clear();
                     }
+                    // 全部行出结果：有可用结果时完成不另发声（完成信号由进入识别时的处理音承担）；
+                    // 全部失败仍发失败音
+                    if !self.rows.iter().any(|r| r.state == RowState::Final) {
+                        self.play_after_restore(SoundEvent::Error);
+                    }
                 }
                 self.emit_rows();
             }
@@ -791,6 +869,10 @@ impl Ctl {
             return;
         }
         self.stop_recording();
+        // 进入识别处理时播「处理」音：等音量恢复窗口后再播，避免卡在还原淡入前半段听不清（Idle 无会话不发声）
+        if !matches!(self.mode, Mode::Idle) {
+            self.play_after_restore(SoundEvent::Processing);
+        }
         match self.mode {
             Mode::Single(ch) => ui::hud(&self.app, "wait", "", ch),
             Mode::Pick | Mode::Compare => {
@@ -825,6 +907,10 @@ impl Ctl {
             Mode::Compare | Mode::Idle => String::new(),
         };
         self.cancel();
+        // 超时等异常打断发失败音；用户取消（message 为 None）保持安静
+        if message.is_some() {
+            self.play_after_restore(SoundEvent::Error);
+        }
         if mode == Mode::Pick {
             if let Some(f) = self.front.take() {
                 f.activate();
@@ -864,6 +950,11 @@ impl Ctl {
     fn cancel(&mut self) {
         self.gen += 1;
         self.timeout_token += 1;
+        // 作废已排队/等待中的延迟提示音（处理音等）：松手后恢复窗口内取消（Esc/超时）不再出声（review #5）。
+        // abort() 随后的 play_after_restore(Error) 在本次递增之后捕获代数，失败音不受影响。
+        self.chime_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // 会话作废：本次未再压低音量，后续录音重新累计
+        self.ducked = false;
         for t in self.tasks.drain(..) {
             t.abort();
         }

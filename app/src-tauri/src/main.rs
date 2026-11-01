@@ -4,6 +4,7 @@ mod controller;
 mod hotkey;
 mod offline;
 mod settings;
+mod sound;
 mod ui;
 mod update;
 mod wtoffline;
@@ -220,6 +221,17 @@ fn meter(app: AppHandle, on: bool) {
 }
 
 #[tauri::command]
+fn preview_sound(app: AppHandle, id: String) {
+    crate::sound::play_id(&app, &id);
+}
+
+#[tauri::command]
+fn list_sounds() -> Vec<serde_json::Value> {
+    // 只列出当前平台能发声的音效：非 macOS 无兜底 WAV 的系统音不提供（review #3）
+    crate::sound::selectable_sounds().iter().map(|id| json!({ "id": id, "name": id })).collect()
+}
+
+#[tauri::command]
 fn open_url(url: String) {
     let cmd = if cfg!(target_os = "macos") { "open" } else { "explorer" };
     let _ = std::process::Command::new(cmd).arg(url).spawn();
@@ -254,7 +266,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_state, set_settings, perm_status, perm_action, microphones, record_shortcut,
             pick_choose, pick_key, pick_resize, compare_toggle, meter, open_url, model_download,
-            update_check, update_install, jev_test
+            update_check, update_install, jev_test, preview_sound, list_sounds
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]
