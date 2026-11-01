@@ -227,7 +227,8 @@ fn preview_sound(app: AppHandle, id: String) {
 
 #[tauri::command]
 fn list_sounds() -> Vec<serde_json::Value> {
-    crate::sound::SYSTEM_SOUNDS.iter().map(|id| json!({ "id": id, "name": id })).collect()
+    // 只列出当前平台能发声的音效：非 macOS 无兜底 WAV 的系统音不提供（review #3）
+    crate::sound::selectable_sounds().iter().map(|id| json!({ "id": id, "name": id })).collect()
 }
 
 #[tauri::command]

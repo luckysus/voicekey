@@ -185,7 +185,9 @@ impl Settings {
             (&mut self.sound_processing, crate::sound::DEFAULT_PROCESSING),
             (&mut self.sound_error, crate::sound::DEFAULT_ERROR),
         ] {
-            if id != NONE && !crate::sound::is_known(id) {
+            // 非法值或当前平台不可选（无发声路径，如非 macOS 上无兜底 WAV 的系统音）
+            // 一律回退该事件默认值，避免「选了不响」（review #3）
+            if id != NONE && !crate::sound::selectable_sounds().contains(&id.as_str()) {
                 *id = default.into();
             }
         }
@@ -294,6 +296,30 @@ mod sound_settings_tests {
         s.sound_error = error.clone();
         s.sanitize();
         assert_eq!(s.sound_error, error);
+    }
+
+    /// 非 macOS：无同名兜底 WAV 的系统音不可发声，sanitize 回退该事件默认值（review #3）
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn sanitize_reverts_platform_unavailable_sound_ids() {
+        let mut s = Settings::default();
+        s.sound_start = "Glass".into();
+        s.sound_error = "Frog".into();
+        s.sanitize();
+        assert_eq!(s.sound_start, crate::sound::DEFAULT_START, "无兜底音回退默认");
+        assert_eq!(s.sound_error, crate::sound::DEFAULT_ERROR, "无兜底音回退默认");
+    }
+
+    /// macOS：系统铃声全量可选，合法选择不被 sanitize 回退
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn sanitize_keeps_platform_available_sound_ids() {
+        let mut s = Settings::default();
+        s.sound_start = "Glass".into();
+        s.sound_error = "Frog".into();
+        s.sanitize();
+        assert_eq!(s.sound_start, "Glass", "macOS 上系统音都可选");
+        assert_eq!(s.sound_error, "Frog");
     }
 
     /// 「无」是显式合法取值：sanitize 不得把它回退成默认音效

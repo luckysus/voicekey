@@ -72,6 +72,26 @@ pub fn is_known(id: &str) -> bool {
     id == crate::settings::NONE || SYSTEM_SOUNDS.contains(&id)
 }
 
+/// 设置页可选择（当前平台能发声）的音效集合，不含 `none`（由调用方单独提供）。
+/// macOS 提供全部系统铃声；非 macOS 仅有同名兜底 WAV 的项——其余选择不会发声，
+/// 不应出现在下拉里（review #3）。sanitize 亦按此集合校验，历史配置自动回退默认。
+pub fn selectable_sounds() -> &'static [&'static str] {
+    #[cfg(target_os = "macos")]
+    {
+        SYSTEM_SOUNDS
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // 从全集按兜底映射过滤；集合恒定，leak 一次性固化
+        SYSTEM_SOUNDS
+            .iter()
+            .copied()
+            .filter(|id| wav_fallback_id(id).is_some())
+            .collect::<Vec<_>>()
+            .leak()
+    }
+}
+
 /// 会话事件播放：遵循总开关与逐事件选择。macOS 用 NSSound(named:) 主线程直放；
 /// Windows 无系统音，按同名内置近似 WAV 兜底（无同名近似音则静音，已知平台限制）。
 pub fn play<R: Runtime>(app: &AppHandle<R>, event: SoundEvent) {
@@ -343,6 +363,32 @@ mod tests {
         assert_eq!(wav_fallback_id("Pop"), Some("pop"));
         assert_eq!(wav_fallback_id("Basso"), Some("error"));
         assert_eq!(wav_fallback_id("Glass"), None, "无同名近似音的选择在 Windows 静音（已知限制）");
+    }
+
+    /// 可选集合必须保证「列出即可发声」：每一项都有发声路径（review #3）
+    #[test]
+    fn selectable_sounds_all_have_playback_path() {
+        for id in selectable_sounds() {
+            assert!(is_known(id), "可选集合必须是合法音名：{id}");
+            #[cfg(not(target_os = "macos"))]
+            assert!(wav_fallback_id(id).is_some(), "非 macOS 可选项必须有兜底 WAV：{id}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn selectable_sounds_cover_all_system_sounds_on_macos() {
+        assert_eq!(selectable_sounds(), SYSTEM_SOUNDS);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn selectable_sounds_limited_to_fallbackable_on_non_macos() {
+        assert_eq!(selectable_sounds().len(), 3, "非 macOS 只应有 Basso/Pop/Tink 三项");
+        assert!(selectable_sounds().contains(&"Tink"));
+        assert!(selectable_sounds().contains(&"Pop"));
+        assert!(selectable_sounds().contains(&"Basso"));
+        assert!(!selectable_sounds().contains(&"Glass"), "无兜底音不得出现在非 macOS 列表");
     }
 
     /// 压音量延迟依据：无兜底 WAV 的系统音不得估为 0，否则开始音未播完就被压掉
