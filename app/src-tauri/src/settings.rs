@@ -105,7 +105,8 @@ pub struct Settings {
     pub last_pick: Option<Channel>,
     /// 候选框各渠道上屏次数，次数多的排前
     pub pick_counts: HashMap<Channel, u32>,
-    /// 音频反馈提示音总开关
+    /// 音频反馈提示音总开关；默认关闭——缺省键=关，升级用户不会被突然出声
+    /// （与 lower_system_volume 默认关闭原则一致，review #4）
     pub sound_enabled: bool,
     /// 录音开始的提示音 id（见 crate::sound::SYSTEM_SOUNDS）
     pub sound_start: String,
@@ -140,7 +141,7 @@ impl Default for Settings {
             multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
             last_pick: None,
             pick_counts: HashMap::new(),
-            sound_enabled: true,
+            sound_enabled: false,
             sound_start: crate::sound::DEFAULT_START.into(),
             sound_processing: crate::sound::DEFAULT_PROCESSING.into(),
             sound_error: crate::sound::DEFAULT_ERROR.into(),
@@ -275,7 +276,7 @@ mod sound_settings_tests {
     #[test]
     fn legacy_config_without_sound_fields_falls_back_to_defaults() {
         let s: Settings = serde_json::from_str(r#"{"channel":"doubao","mic":""}"#).unwrap();
-        assert!(s.sound_enabled, "提示音总开关默认开启");
+        assert!(!s.sound_enabled, "缺省键=关：升级用户不被突然出声（review #4）");
         assert!(crate::sound::is_known(&s.sound_start), "默认开始音效必须在音效池中");
         assert!(crate::sound::is_known(&s.sound_processing));
         assert!(crate::sound::is_known(&s.sound_error));
