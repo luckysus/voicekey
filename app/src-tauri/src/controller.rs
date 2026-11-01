@@ -411,7 +411,6 @@ impl Ctl {
             self.recording = true;
             self.heard_voice = false;
             self.last_voice = Instant::now();
-            ui::set_tray_active(&self.app, true);
             audio
         };
 
@@ -487,7 +486,6 @@ impl Ctl {
         self.recording = true;
         self.heard_voice = false;
         self.last_voice = Instant::now();
-        ui::set_tray_active(&self.app, true);
         Some(rx)
     }
 
@@ -502,7 +500,6 @@ impl Ctl {
         if let Some(mut r) = self.recorder.take() {
             r.stop();
         }
-        ui::set_tray_active(&self.app, false);
     }
 
     fn spawn_engine(&mut self, ch: Channel, seg: usize, audio: voicekey_core::Audio) {
