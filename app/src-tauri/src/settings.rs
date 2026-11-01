@@ -111,8 +111,6 @@ pub struct Settings {
     pub sound_start: String,
     /// 进入识别处理的提示音 id
     pub sound_processing: String,
-    /// 识别完成的提示音 id
-    pub sound_done: String,
     /// 识别失败的提示音 id
     pub sound_error: String,
     pub autostart: bool,
@@ -145,7 +143,6 @@ impl Default for Settings {
             sound_enabled: true,
             sound_start: crate::sound::DEFAULT_START.into(),
             sound_processing: crate::sound::DEFAULT_PROCESSING.into(),
-            sound_done: crate::sound::DEFAULT_DONE.into(),
             sound_error: crate::sound::DEFAULT_ERROR.into(),
             autostart: false,
             theme: "system".into(),
@@ -186,7 +183,6 @@ impl Settings {
         for (id, default) in [
             (&mut self.sound_start, crate::sound::DEFAULT_START),
             (&mut self.sound_processing, crate::sound::DEFAULT_PROCESSING),
-            (&mut self.sound_done, crate::sound::DEFAULT_DONE),
             (&mut self.sound_error, crate::sound::DEFAULT_ERROR),
         ] {
             if id != NONE && !crate::sound::is_known(id) {
@@ -280,7 +276,6 @@ mod sound_settings_tests {
         assert!(s.sound_enabled, "提示音总开关默认开启");
         assert!(crate::sound::is_known(&s.sound_start), "默认开始音效必须在音效池中");
         assert!(crate::sound::is_known(&s.sound_processing));
-        assert!(crate::sound::is_known(&s.sound_done));
         assert!(crate::sound::is_known(&s.sound_error));
     }
 
@@ -288,22 +283,16 @@ mod sound_settings_tests {
     #[test]
     fn sanitize_reverts_unknown_sound_ids_to_defaults() {
         let mut s = Settings::default();
-        let (start, processing, done, error) = (
-            s.sound_start.clone(),
-            s.sound_processing.clone(),
-            s.sound_done.clone(),
-            s.sound_error.clone(),
-        );
+        let (start, processing, error) =
+            (s.sound_start.clone(), s.sound_processing.clone(), s.sound_error.clone());
         s.sound_start = "nope".into();
-        s.sound_done = "".into();
+        s.sound_processing = "".into();
         s.sanitize();
         assert_eq!(s.sound_start, start);
-        assert_eq!(s.sound_done, done);
+        assert_eq!(s.sound_processing, processing);
         // 合法 id 原样保留
-        s.sound_processing = processing.clone();
         s.sound_error = error.clone();
         s.sanitize();
-        assert_eq!(s.sound_processing, processing);
         assert_eq!(s.sound_error, error);
     }
 
@@ -311,14 +300,13 @@ mod sound_settings_tests {
     #[test]
     fn sanitize_keeps_none_sound_ids() {
         let mut s = Settings::default();
-        for id in [&mut s.sound_start, &mut s.sound_processing, &mut s.sound_done, &mut s.sound_error] {
+        for id in [&mut s.sound_start, &mut s.sound_processing, &mut s.sound_error] {
             *id = NONE.into();
         }
         s.sanitize();
         for (field, id) in [
             ("sound_start", s.sound_start.as_str()),
             ("sound_processing", s.sound_processing.as_str()),
-            ("sound_done", s.sound_done.as_str()),
             ("sound_error", s.sound_error.as_str()),
         ] {
             assert_eq!(id, NONE, "{field} 的「无」选择不得被 sanitize 回退");

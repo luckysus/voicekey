@@ -16,7 +16,7 @@ export interface JevTested { index: number; text: string; alias: string; ms: num
 export interface Settings {
   channel: Channel; holdKey: string; holdCombo: Combo | null; tapShortcut: Shortcut | null; silence: number; silenceStop: boolean; streaming: boolean;
   liveText: boolean; mic: string; multi: Channel[]; lastPick: Channel | null; pickCounts: Partial<Record<Channel, number>>;
-  soundEnabled: boolean; soundStart: string; soundProcessing: string; soundDone: string; soundError: string;
+  soundEnabled: boolean; soundStart: string; soundProcessing: string; soundError: string;
   autostart: boolean; theme: string; lowerSystemVolume: boolean; lowerSystemVolumePercent: number; onboarded: boolean;
   jev: JevConfig;
 }

@@ -21,11 +21,11 @@ pub const SYSTEM_SOUNDS: &[&str] = &[
     "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink",
 ];
 
-/// 各事件默认音效（macOS 系统音名）；完成与失败默认不发声——完成因识别很快不另发音效，
-/// 失败与英文原版 cometix-dictation 对齐（仅视觉提示），需要时可在面板手动选择失败音
+/// 各事件默认音效（macOS 系统音名）；失败默认不发声——与英文原版 cometix-dictation
+/// 对齐（仅视觉提示），需要时可在面板手动选择失败音。完成不设独立事件：识别很快，
+/// 处理音即完成信号（review #1 移除「识别完成」行）
 pub const DEFAULT_START: &str = "Tink";
 pub const DEFAULT_PROCESSING: &str = "Pop";
-pub const DEFAULT_DONE: &str = "none";
 pub const DEFAULT_ERROR: &str = "none";
 
 /// Windows 兜底：选中的系统音若有同名内置近似 WAV（resources/sounds/，CC0）则以其发声
@@ -42,9 +42,6 @@ fn wav_fallback_id(name: &str) -> Option<&'static str> {
 pub enum SoundEvent {
     Start,
     Processing,
-    /// 完成事件保留设置行但不在结果就绪时接线发声（识别很快，完成信号由处理音承担）
-    #[allow(dead_code)]
-    Done,
     Error,
 }
 
@@ -53,7 +50,6 @@ pub fn event_id<'a>(event: SoundEvent, s: &'a Settings) -> &'a str {
     match event {
         SoundEvent::Start => &s.sound_start,
         SoundEvent::Processing => &s.sound_processing,
-        SoundEvent::Done => &s.sound_done,
         SoundEvent::Error => &s.sound_error,
     }
 }
@@ -324,11 +320,10 @@ mod tests {
             assert!(!id.is_empty() && *id != crate::settings::NONE, "非法音名：{id}");
             assert!(seen.insert(*id), "重复音名：{id}");
         }
-        // 发声默认值都在集合中；完成与失败默认「不发声」
+        // 发声默认值都在集合中；失败默认「不发声」
         for id in [DEFAULT_START, DEFAULT_PROCESSING] {
             assert!(SYSTEM_SOUNDS.contains(&id), "默认音效 {id} 必须在系统铃声集合中");
         }
-        assert_eq!(DEFAULT_DONE, crate::settings::NONE, "完成默认不发声");
         assert_eq!(DEFAULT_ERROR, crate::settings::NONE, "失败默认不发声");
     }
 
@@ -370,7 +365,7 @@ mod tests {
     fn master_switch_off_gates_all_events() {
         let mut s = Settings::default();
         s.sound_enabled = false;
-        for event in [SoundEvent::Start, SoundEvent::Processing, SoundEvent::Done, SoundEvent::Error] {
+        for event in [SoundEvent::Start, SoundEvent::Processing, SoundEvent::Error] {
             assert_eq!(gated_id(event, &s), None, "总开关关闭时 {event:?} 不应发声");
         }
     }
@@ -380,11 +375,11 @@ mod tests {
         let mut s = Settings::default();
         s.sound_enabled = true;
         // 改一个事件的选择只影响该事件
-        let done_before = event_id(SoundEvent::Done, &s).to_string();
-        s.sound_processing = done_before.clone();
-        assert_eq!(event_id(SoundEvent::Processing, &s), done_before);
+        let error_before = event_id(SoundEvent::Error, &s).to_string();
+        s.sound_processing = error_before.clone();
+        assert_eq!(event_id(SoundEvent::Processing, &s), error_before);
         s.sound_processing = String::new();
-        assert_eq!(event_id(SoundEvent::Done, &s), done_before, "其他事件的选择不受影响");
+        assert_eq!(event_id(SoundEvent::Error, &s), error_before, "其他事件的选择不受影响");
     }
 
     #[test]
@@ -392,13 +387,11 @@ mod tests {
         let s = Settings::default();
         assert_eq!(event_id(SoundEvent::Start, &s), "Tink");
         assert_eq!(event_id(SoundEvent::Processing, &s), "Pop");
-        assert_eq!(event_id(SoundEvent::Done, &s), crate::settings::NONE, "完成默认不发声");
         assert_eq!(event_id(SoundEvent::Error, &s), crate::settings::NONE, "失败默认不发声");
         let mut s = Settings::default();
         s.sound_enabled = true;
         assert_eq!(gated_id(SoundEvent::Start, &s), Some("Tink"));
         assert_eq!(gated_id(SoundEvent::Processing, &s), Some("Pop"));
-        assert_eq!(gated_id(SoundEvent::Done, &s), None, "「不发声」事件门控为 None");
         assert_eq!(gated_id(SoundEvent::Error, &s), None, "失败默认不发声");
     }
 
@@ -408,14 +401,13 @@ mod tests {
         s.sound_enabled = true;
         s.sound_start = "Glass".into();
         s.sound_processing = "Funk".into();
-        s.sound_done = crate::settings::NONE.into();
         s.sound_error = "Sosumi".into();
-        let before = (s.sound_start.clone(), s.sound_processing.clone(), s.sound_done.clone(), s.sound_error.clone());
-        for event in [SoundEvent::Start, SoundEvent::Processing, SoundEvent::Done, SoundEvent::Error] {
+        let before = (s.sound_start.clone(), s.sound_processing.clone(), s.sound_error.clone());
+        for event in [SoundEvent::Start, SoundEvent::Processing, SoundEvent::Error] {
             let _ = gated_id(event, &s);
         }
         assert_eq!(
-            (s.sound_start.clone(), s.sound_processing.clone(), s.sound_done.clone(), s.sound_error.clone()),
+            (s.sound_start.clone(), s.sound_processing.clone(), s.sound_error.clone()),
             before,
             "门控必须只读，不改写逐事件选择"
         );
