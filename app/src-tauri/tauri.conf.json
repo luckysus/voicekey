@@ -26,6 +26,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": [
+      "resources/sounds/*"
+    ],
     "targets": [
       "app",
       "msi",

@@ -1,16 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { app, save, refreshMics } from "../lib/store.svelte";
-  import { call } from "../lib/api";
+  import { call, listSounds, previewSound } from "../lib/api";
   import Meter from "../lib/Meter.svelte";
 
   const s = $derived(app.s!);
   const missing = $derived(s.mic && !app.mics.includes(s.mic));
+  let sounds = $state<{ id: string; name: string }[]>([]);
   // 设置值和 UI 都直接表示“降低比例”；100% 只改变展示为“静音”，数值本身不做反转。
   const duckReductionLabel = $derived(s.lowerSystemVolumePercent === 100 ? "静音" : `−${s.lowerSystemVolumePercent}%`);
 
   onMount(() => {
     refreshMics();
+    listSounds().then((v) => (sounds = v));
     // 电平表只在设置窗处于前台时占用麦克风，切到其他应用立即释放。
     const onFocus = () => {
       refreshMics();
@@ -32,6 +34,15 @@
   function pick(v: string) {
     save({ mic: v });
   }
+
+  // 面板行：标题按会话时刻命名，副标题只描述该时刻（不提发声与否）；
+  // key 对应后端逐事件设置字段（存 macOS 系统音名或 none）
+  const CHIME_ROWS: { title: string; desc: string; key: "soundStart" | "soundProcessing" | "soundDone" | "soundError" }[] = [
+    { title: "录音开始", desc: "开始录入语音时", key: "soundStart" },
+    { title: "识别处理", desc: "录音结束，进入识别处理", key: "soundProcessing" },
+    { title: "识别完成", desc: "识别结果就绪或上屏时", key: "soundDone" },
+    { title: "识别失败", desc: "出错、超时或没有内容时", key: "soundError" },
+  ];
 </script>
 
 <h2>音频</h2>
@@ -64,7 +75,28 @@
   </div>
 </div>
 
+<h3>提示音</h3>
+<div class="group">
+  <div class="row">
+    <div class="lbl">提示音<small>{s.soundEnabled ? "录音各阶段播放提示音" : "已关闭，录音各阶段不播放提示音"}</small></div>
+    <button class="sw" class:on={s.soundEnabled} onclick={() => save({ soundEnabled: !s.soundEnabled })} aria-label="提示音"></button>
+  </div>
+  <!-- 逐事件系统铃声选择：每行一个选择器（不发声 + macOS 系统铃声），试听即所得 -->
+  {#each CHIME_ROWS as row (row.key)}
+    <div class="row">
+      <div class="lbl">{row.title}<small>{row.desc}</small></div>
+      <select class="sel" value={s[row.key]} onchange={(e) => save({ [row.key]: e.currentTarget.value })} aria-label={row.title}>
+        <option value="none">不发声</option>
+        {#each sounds as snd}<option value={snd.id}>{snd.name}</option>{/each}
+      </select>
+      <!-- 「不发声」时试听置灰（不可点），保持行内布局稳定 -->
+      <button class="btn" disabled={s[row.key] === "none"} onclick={() => previewSound(s[row.key])} aria-label={`试听${row.title}`}>试听</button>
+    </div>
+  {/each}
+</div>
+
 <style>
   .duck-range { width: 160px; accent-color: var(--accent); }
   .duck-value { width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
 </style>

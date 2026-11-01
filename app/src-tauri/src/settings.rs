@@ -82,6 +82,9 @@ const LOWER_SYSTEM_VOLUME_PERCENT_MAX: u8 = 100;
 const LOWER_SYSTEM_VOLUME_PERCENT_STEP: u8 = 5;
 const LOWER_SYSTEM_VOLUME_PERCENT_DEFAULT: u8 = 70;
 
+/// 「无」保留字：音效逐事件的显式停用取值
+pub const NONE: &str = "none";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -102,6 +105,16 @@ pub struct Settings {
     pub last_pick: Option<Channel>,
     /// 候选框各渠道上屏次数，次数多的排前
     pub pick_counts: HashMap<Channel, u32>,
+    /// 音频反馈提示音总开关
+    pub sound_enabled: bool,
+    /// 录音开始的提示音 id（见 crate::sound::SYSTEM_SOUNDS）
+    pub sound_start: String,
+    /// 进入识别处理的提示音 id
+    pub sound_processing: String,
+    /// 识别完成的提示音 id
+    pub sound_done: String,
+    /// 识别失败的提示音 id
+    pub sound_error: String,
     pub autostart: bool,
     pub theme: String,
     /// 真正进入聆听后按相对比例压低系统输出；默认关闭，升级用户不会被突然改变系统声音。
@@ -129,6 +142,11 @@ impl Default for Settings {
             multi: Channel::engines().into_iter().filter(|&c| c != Channel::WetypeOffline).collect(),
             last_pick: None,
             pick_counts: HashMap::new(),
+            sound_enabled: true,
+            sound_start: crate::sound::DEFAULT_START.into(),
+            sound_processing: crate::sound::DEFAULT_PROCESSING.into(),
+            sound_done: crate::sound::DEFAULT_DONE.into(),
+            sound_error: crate::sound::DEFAULT_ERROR.into(),
             autostart: false,
             theme: "system".into(),
             lower_system_volume: false,
@@ -165,6 +183,16 @@ impl Settings {
             self.hold_key = voicekey_platform::hold_keys()[0].id.into();
         }
         self.silence = self.silence.clamp(1.0, 5.0);
+        for (id, default) in [
+            (&mut self.sound_start, crate::sound::DEFAULT_START),
+            (&mut self.sound_processing, crate::sound::DEFAULT_PROCESSING),
+            (&mut self.sound_done, crate::sound::DEFAULT_DONE),
+            (&mut self.sound_error, crate::sound::DEFAULT_ERROR),
+        ] {
+            if id != NONE && !crate::sound::is_known(id) {
+                *id = default.into();
+            }
+        }
         let percent = self
             .lower_system_volume_percent
             .clamp(LOWER_SYSTEM_VOLUME_PERCENT_MIN, LOWER_SYSTEM_VOLUME_PERCENT_MAX);
@@ -238,5 +266,62 @@ mod tests {
 
         settings.lower_system_volume_percent = 20;
         assert!((settings.retained_system_volume_fraction() - 0.8).abs() < f32::EPSILON);
+    }
+}
+
+#[cfg(test)]
+mod sound_settings_tests {
+    use super::*;
+
+    /// 旧版配置文件没有提示音字段：反序列化后应得到默认值，不报错
+    #[test]
+    fn legacy_config_without_sound_fields_falls_back_to_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"channel":"doubao","mic":""}"#).unwrap();
+        assert!(s.sound_enabled, "提示音总开关默认开启");
+        assert!(crate::sound::is_known(&s.sound_start), "默认开始音效必须在音效池中");
+        assert!(crate::sound::is_known(&s.sound_processing));
+        assert!(crate::sound::is_known(&s.sound_done));
+        assert!(crate::sound::is_known(&s.sound_error));
+    }
+
+    /// 配置里出现未知/已下架音效 id：sanitize 应回退为该事件默认值
+    #[test]
+    fn sanitize_reverts_unknown_sound_ids_to_defaults() {
+        let mut s = Settings::default();
+        let (start, processing, done, error) = (
+            s.sound_start.clone(),
+            s.sound_processing.clone(),
+            s.sound_done.clone(),
+            s.sound_error.clone(),
+        );
+        s.sound_start = "nope".into();
+        s.sound_done = "".into();
+        s.sanitize();
+        assert_eq!(s.sound_start, start);
+        assert_eq!(s.sound_done, done);
+        // 合法 id 原样保留
+        s.sound_processing = processing.clone();
+        s.sound_error = error.clone();
+        s.sanitize();
+        assert_eq!(s.sound_processing, processing);
+        assert_eq!(s.sound_error, error);
+    }
+
+    /// 「无」是显式合法取值：sanitize 不得把它回退成默认音效
+    #[test]
+    fn sanitize_keeps_none_sound_ids() {
+        let mut s = Settings::default();
+        for id in [&mut s.sound_start, &mut s.sound_processing, &mut s.sound_done, &mut s.sound_error] {
+            *id = NONE.into();
+        }
+        s.sanitize();
+        for (field, id) in [
+            ("sound_start", s.sound_start.as_str()),
+            ("sound_processing", s.sound_processing.as_str()),
+            ("sound_done", s.sound_done.as_str()),
+            ("sound_error", s.sound_error.as_str()),
+        ] {
+            assert_eq!(id, NONE, "{field} 的「无」选择不得被 sanitize 回退");
+        }
     }
 }
