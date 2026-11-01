@@ -448,8 +448,15 @@ impl Ctl {
         let delay = crate::sound::play_duration(&self.app, SoundEvent::Start, &self.settings());
         let (enabled, reduction_percent) = (settings.lower_system_volume, settings.lower_system_volume_percent);
         let tx = self.tx.clone();
+        let chime_gen = self.chime_gen.clone();
+        let my_gen = chime_gen.load(std::sync::atomic::Ordering::Relaxed);
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(delay).await;
+            // 延迟压音量与延迟提示音共用会话代数门闩：等待期间取消或又开了新会话
+            // （代数已变）则丢弃本条，避免上一次的延迟消息压到新一次的开始音（review #6）
+            if chime_gen.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                return;
+            }
             let _ = tx.send(Msg::VolumeDucking { enabled, reduction_percent });
         });
         Some(audio)
@@ -943,6 +950,9 @@ impl Ctl {
     fn cancel(&mut self) {
         self.gen += 1;
         self.timeout_token += 1;
+        // 作废已排队/等待中的延迟提示音（处理音等）：松手后恢复窗口内取消（Esc/超时）不再出声（review #5）。
+        // abort() 随后的 play_after_restore(Error) 在本次递增之后捕获代数，失败音不受影响。
+        self.chime_gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // 会话作废：本次未再压低音量，后续录音重新累计
         self.ducked = false;
         for t in self.tasks.drain(..) {
