@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn wav_duration_matches_real_pool_files() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/sounds");
-        for (id, expected_ms) in [("tink", 55), ("pop", 72), ("ding", 300), ("switch", 124)] {
+        for (id, expected_ms) in [("tink", 55), ("pop", 72), ("error", 130)] {
             let bytes = std::fs::read(dir.join(format!("{id}.wav"))).expect("池内文件存在");
             let d = wav_duration_bytes(&bytes).expect("真实 WAV 应能解析出时长");
             let got = d.as_millis() as i64;

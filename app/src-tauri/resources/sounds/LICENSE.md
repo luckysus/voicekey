@@ -9,23 +9,15 @@
 
 转换处理：ffmpeg 裁剪首尾静音（-45dB 阈值）、混为单声道、44.1kHz / 16-bit PCM WAV。
 
-| 文件 | 原始文件 | 时长 | 默认用途 |
-| --- | --- | --- | --- |
-| `switch.wav` | `switch_001.wav` | ~0.12s | 录音开始 |
-| `minimize.wav` | `minimize_001.wav` | ~0.25s | 进入识别处理 |
-| `confirmation.wav` | `confirmation_001.wav` | ~0.28s | 识别完成 |
-| `error.wav` | `error_001.wav` | ~0.13s | 识别失败 |
-| `pluck.wav` | `pluck_001.wav` | ~0.06s | 可选 |
-| `glass.wav` | `glass_001.wav` | ~0.18s | 可选 |
-| `tink.wav` | `tick_004.wav` | ~0.05s | 简洁方案兜底音（Windows/系统音不可用）·录音开始 |
-| `pop.wav` | `drop_003.wav` | ~0.07s | 简洁方案兜底音（Windows/系统音不可用）·进入识别处理 |
-| `ding.wav` | `confirmation_003.wav` | ~0.30s | 可选 |
-| `soft-alert.wav` | `error_008.wav` | ~0.14s | 可选 |
+本目录只保留 macOS 系统音兜底实际用到的 3 个 WAV（音色按 cometix-dictation 的
+极简提示音风格，从同一素材包挑选的近似替代——Apple 系统音不可再分发，macOS 上
+直接运行时引用系统音 `Tink`/`Pop`/`Basso`，与 cometix-dictation 一致）：
 
-> 简洁方案的兜底音（tink/pop）为 simple-sound-scheme change 新增：
-> 按 cometix-dictation 的极简提示音风格（macOS 系统音 Tink/Pop 的音色特征）从同一素材包
-> 挑选的替代音色——Apple 系统音不可再分发，macOS 上简洁方案直接运行时引用系统音
-> （与 cometix-dictation 一致），Windows 及系统音不可用时使用这两个 CC0 兜底音。
+| 文件 | 原始文件 | 时长 | 兜底对象 | 默认用途 |
+| --- | --- | --- | --- | --- |
+| `tink.wav` | `tick_004.wav` | ~0.05s | 系统音 `Tink` | 录音开始（Windows/系统音不可用） |
+| `pop.wav` | `drop_003.wav` | ~0.07s | 系统音 `Pop` | 进入识别处理（Windows/系统音不可用） |
+| `error.wav` | `error_001.wav` | ~0.13s | 系统音 `Basso` | 识别失败（默认不发声，可手动选择） |
 
 > Kenney 的原始授权声明见下（摘自素材包 LICENSE.txt）：
 >
