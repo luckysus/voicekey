@@ -304,7 +304,7 @@ mod sound_settings_tests {
     #[test]
     fn sanitize_reverts_platform_unavailable_sound_ids() {
         let mut s = Settings::default();
-        s.sound_start = "Glass".into();
+        s.sound_start = "Hero".into();
         s.sound_error = "Frog".into();
         s.sanitize();
         assert_eq!(s.sound_start, crate::sound::DEFAULT_START, "无兜底音回退默认");

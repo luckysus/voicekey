@@ -23,15 +23,22 @@ pub const SYSTEM_SOUNDS: &[&str] = &[
 
 /// 各事件默认音效（macOS 系统音名）；失败默认不发声——与英文原版 cometix-dictation
 /// 对齐（仅视觉提示），需要时可在面板手动选择失败音。完成不设独立事件：识别很快，
-/// 处理音即完成信号（review #1 移除「识别完成」行）
+/// 处理音即完成信号（review #1 移除「识别完成」行）。
+/// 开始音默认按平台取：macOS 沿用 Tink（cometix-dictation 对齐）；非 macOS 无系统音，
+/// 默认 Glass——其兜底玻璃音的音色即用户选定音，名称与实际发声一致（用户反馈）
+#[cfg(target_os = "macos")]
 pub const DEFAULT_START: &str = "Tink";
+#[cfg(not(target_os = "macos"))]
+pub const DEFAULT_START: &str = "Glass";
 pub const DEFAULT_PROCESSING: &str = "Pop";
 pub const DEFAULT_ERROR: &str = "none";
 
-/// Windows 兜底：选中的系统音若有同名内置近似 WAV（resources/sounds/，CC0）则以其发声
+/// 非 macOS 兜底：选中的系统音若有同名内置近似 WAV（resources/sounds/，CC0）则以其发声。
+/// Glass 的兜底按用户试听选定 glass_005（玻璃轻碰）；原 Tink 近似音音色不符已移除，
+/// 「选 Tink 在 Windows 静音」的已知限制随之消失——不可发声的项不再出现在列表里
 fn wav_fallback_id(name: &str) -> Option<&'static str> {
     match name {
-        "Tink" => Some("tink"),
+        "Glass" => Some("glass"),
         "Pop" => Some("pop"),
         "Basso" => Some("error"),
         _ => None,
@@ -359,10 +366,10 @@ mod tests {
 
     #[test]
     fn wav_fallback_covers_default_sounding_events() {
-        assert_eq!(wav_fallback_id("Tink"), Some("tink"));
+        assert_eq!(wav_fallback_id("Glass"), Some("glass"));
         assert_eq!(wav_fallback_id("Pop"), Some("pop"));
         assert_eq!(wav_fallback_id("Basso"), Some("error"));
-        assert_eq!(wav_fallback_id("Glass"), None, "无同名近似音的选择在 Windows 静音（已知限制）");
+        assert_eq!(wav_fallback_id("Tink"), None, "Tink 无兜底近似音，非 macOS 不可选（名称须与实际音色一致）");
     }
 
     /// 可选集合必须保证「列出即可发声」：每一项都有发声路径（review #3）
@@ -384,11 +391,11 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn selectable_sounds_limited_to_fallbackable_on_non_macos() {
-        assert_eq!(selectable_sounds().len(), 3, "非 macOS 只应有 Basso/Pop/Tink 三项");
-        assert!(selectable_sounds().contains(&"Tink"));
-        assert!(selectable_sounds().contains(&"Pop"));
+        assert_eq!(selectable_sounds().len(), 3, "非 macOS 只应有 Basso/Glass/Pop 三项");
         assert!(selectable_sounds().contains(&"Basso"));
-        assert!(!selectable_sounds().contains(&"Glass"), "无兜底音不得出现在非 macOS 列表");
+        assert!(selectable_sounds().contains(&"Glass"));
+        assert!(selectable_sounds().contains(&"Pop"));
+        assert!(!selectable_sounds().contains(&"Tink"), "无兜底音不得出现在非 macOS 列表");
     }
 
     /// 压音量延迟依据：无兜底 WAV 的系统音不得估为 0，否则开始音未播完就被压掉
@@ -431,12 +438,18 @@ mod tests {
     #[test]
     fn defaults_follow_per_event_system_sounds() {
         let s = Settings::default();
+        #[cfg(target_os = "macos")]
         assert_eq!(event_id(SoundEvent::Start, &s), "Tink");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(event_id(SoundEvent::Start, &s), "Glass", "非 macOS 默认开始音=Glass（兜底音色即其所指）");
         assert_eq!(event_id(SoundEvent::Processing, &s), "Pop");
         assert_eq!(event_id(SoundEvent::Error, &s), crate::settings::NONE, "失败默认不发声");
         let mut s = Settings::default();
         s.sound_enabled = true;
+        #[cfg(target_os = "macos")]
         assert_eq!(gated_id(SoundEvent::Start, &s), Some("Tink"));
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(gated_id(SoundEvent::Start, &s), Some("Glass"));
         assert_eq!(gated_id(SoundEvent::Processing, &s), Some("Pop"));
         assert_eq!(gated_id(SoundEvent::Error, &s), None, "失败默认不发声");
     }
@@ -490,7 +503,7 @@ mod tests {
     #[test]
     fn wav_duration_matches_real_pool_files() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/sounds");
-        for (id, expected_ms) in [("tink", 55), ("pop", 72), ("error", 130)] {
+        for (id, expected_ms) in [("glass", 44), ("pop", 72), ("error", 130)] {
             let bytes = std::fs::read(dir.join(format!("{id}.wav"))).expect("池内文件存在");
             let d = wav_duration_bytes(&bytes).expect("真实 WAV 应能解析出时长");
             let got = d.as_millis() as i64;
