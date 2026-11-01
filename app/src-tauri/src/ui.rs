@@ -11,7 +11,6 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, Monitor, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const TRAY: &[u8] = include_bytes!("../icons/tray.png");
-const TRAY_ACTIVE: &[u8] = include_bytes!("../icons/tray-active.png");
 const HUD_W: f64 = 680.0;
 const HUD_H: f64 = 120.0;
 const PICK_W: f64 = 520.0;
@@ -285,9 +284,9 @@ fn tray_menu<R: Runtime>(app: &AppHandle<R>, s: &Settings, paused: bool) -> taur
     Menu::with_items(app, &refs)
 }
 
-fn tray_icon<R: Runtime>(app: &AppHandle<R>, active: bool) -> Option<Image<'static>> {
+fn tray_icon<R: Runtime>(app: &AppHandle<R>) -> Option<Image<'static>> {
     if cfg!(target_os = "macos") {
-        Image::from_bytes(if active { TRAY_ACTIVE } else { TRAY }).ok()
+        Image::from_bytes(TRAY).ok()
     } else {
         app.default_window_icon().map(|i| i.clone().to_owned())
     }
@@ -300,7 +299,7 @@ pub fn build_tray<R: Runtime>(app: &AppHandle<R>, s: &Settings) -> tauri::Result
         .icon_as_template(true)
         .tooltip("VoiceKey")
         .on_menu_event(|app, ev| crate::tray_event(app, ev.id().as_ref()));
-    if let Some(i) = tray_icon(app, false) {
+    if let Some(i) = tray_icon(app) {
         b = b.icon(i);
     }
     b.build(app)?;
@@ -310,16 +309,6 @@ pub fn build_tray<R: Runtime>(app: &AppHandle<R>, s: &Settings) -> tauri::Result
 pub fn refresh_tray<R: Runtime>(app: &AppHandle<R>, s: &Settings, paused: bool) {
     if let (Some(t), Ok(m)) = (app.tray_by_id("main"), tray_menu(app, s, paused)) {
         let _ = t.set_menu(Some(m));
-    }
-}
-
-pub fn set_tray_active<R: Runtime>(app: &AppHandle<R>, active: bool) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    if let Some(t) = app.tray_by_id("main") {
-        let _ = t.set_icon(tray_icon(app, active));
-        let _ = t.set_icon_as_template(true);
     }
 }
 

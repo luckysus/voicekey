@@ -430,7 +430,6 @@ impl Ctl {
             self.recording = true;
             self.heard_voice = false;
             self.last_voice = Instant::now();
-            ui::set_tray_active(&self.app, true);
             audio
         };
 
@@ -527,7 +526,6 @@ impl Ctl {
         self.recording = true;
         self.heard_voice = false;
         self.last_voice = Instant::now();
-        ui::set_tray_active(&self.app, true);
         Some(rx)
     }
 
@@ -543,7 +541,6 @@ impl Ctl {
         if let Some(mut r) = self.recorder.take() {
             r.stop();
         }
-        ui::set_tray_active(&self.app, false);
     }
 
     /// 录音结束后的单音提示（处理音/失败音）：等系统输出音量恢复后再播，避免卡在还原淡入的前半段听不清。
