@@ -125,5 +125,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "VoiceKey $GITHUB_REF_NAME" --generate-notes \
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "VoiceKey $GITHUB_REF_NAME" --generate-notes --latest \
             --notes "macOS 包未经 Apple 公证（自签名）：首次安装时打开 DMG 将 VoiceKey 拖到「应用程序」，运行前在终端执行 \`xattr -dr com.apple.quarantine /Applications/VoiceKey.app\`；之后可在应用内（设置 → 通用，或菜单栏）直接更新。Windows 提供安装程序（setup.exe）与 MSI 两种格式。"
